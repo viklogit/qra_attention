@@ -1,0 +1,175 @@
+"""
+Kernel Self-Attention Implementation
+
+This module implements a kernel-based self-attention mechanism that replaces
+the standard dot-product similarity (QK^T) with RFF kernel similarity φ(Q)φ(K)^T.
+
+The implementation is a drop-in replacement for standard attention, keeping:
+- Q, K, V projections identical
+- Softmax and output computation identical
+- Only the similarity computation changes
+
+Reference: Protocol v1.0, Section 3 (Implementation Plan)
+"""
+
+import torch
+import torch.nn as nn
+import math
+from typing import Optional, Dict, Any
+
+from qra_attention.kernels.rff import RFFKernel
+
+
+class KernelSelfAttention(nn.Module):
+    """
+    Multi-head self-attention with RFF kernel similarity.
+    
+    This replaces the standard attention mechanism:
+        Standard: Attention(Q,K,V) = softmax(QK^T / √d_k) V
+        Kernel:   Attention(Q,K,V) = softmax(φ(Q)φ(K)^T) V
+    
+    Args:
+        hidden_size (int): Dimension of hidden states
+        num_heads (int): Number of attention heads
+        dropout (float): Dropout probability (default: 0.1)
+        kernel_config (dict): Configuration for RFF kernel
+            - num_features (int): Number of random features (m)
+            - sigma (float): Kernel bandwidth
+            - normalize (bool): Whether to normalize feature maps
+        
+    Attributes:
+        head_dim (int): Dimension per attention head (hidden_size / num_heads)
+        q_proj (nn.Linear): Query projection
+        k_proj (nn.Linear): Key projection
+        v_proj (nn.Linear): Value projection
+        out_proj (nn.Linear): Output projection
+        kernels (nn.ModuleList): RFF kernels (one per head)
+    """
+    
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        kernel_config: Optional[Dict[str, Any]] = None
+    ):
+        super().__init__()
+        
+        assert hidden_size % num_heads == 0, "hidden_size must be divisible by num_heads"
+        
+        self.hidden_size = hidden_size
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
+        self.dropout = nn.Dropout(dropout)
+        
+        # Q, K, V projections (standard)
+        self.q_proj = nn.Linear(hidden_size, hidden_size)
+        self.k_proj = nn.Linear(hidden_size, hidden_size)
+        self.v_proj = nn.Linear(hidden_size, hidden_size)
+        
+        # Output projection
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        
+        # RFF kernel configuration
+        if kernel_config is None:
+            kernel_config = {
+                'num_features': 128,
+                'sigma': 1.0,
+                'normalize': True
+            }
+        
+        # Create one RFF kernel per attention head
+        self.kernels = nn.ModuleList([
+            RFFKernel(
+                input_dim=self.head_dim,
+                num_features=kernel_config.get('num_features', 128),
+                sigma=kernel_config.get('sigma', 1.0),
+                normalize=kernel_config.get('normalize', True)
+            )
+            for _ in range(num_heads)
+        ])
+    
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        output_attentions: bool = False
+    ) -> tuple:
+        """
+        Forward pass of kernel self-attention.
+        
+        Args:
+            hidden_states (torch.Tensor): Input tensor of shape (batch, seq_len, hidden_size)
+            attention_mask (torch.Tensor, optional): Mask of shape (batch, 1, 1, seq_len)
+                where 0 = attend, 1 = mask
+            output_attentions (bool): Whether to return attention weights
+            
+        Returns:
+            tuple: (output, attention_weights) if output_attentions else (output,)
+                - output: (batch, seq_len, hidden_size)
+                - attention_weights: (batch, num_heads, seq_len, seq_len) if requested
+        """
+        batch_size, seq_len, _ = hidden_states.shape
+        
+        # Project to Q, K, V
+        # Shape: (batch, seq_len, hidden_size)
+        q = self.q_proj(hidden_states)
+        k = self.k_proj(hidden_states)
+        v = self.v_proj(hidden_states)
+        
+        # Reshape for multi-head attention
+        # Shape: (batch, num_heads, seq_len, head_dim)
+        q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Compute kernel similarity per head
+        # We need to apply each kernel to its corresponding head
+        attention_scores_list = []
+        
+        for head_idx in range(self.num_heads):
+            # Extract Q, K for this head: (batch, seq_len, head_dim)
+            q_head = q[:, head_idx, :, :].unsqueeze(1)  # (batch, 1, seq_len, head_dim)
+            k_head = k[:, head_idx, :, :].unsqueeze(1)  # (batch, 1, seq_len, head_dim)
+            
+            # Compute kernel similarity: (batch, 1, seq_len, seq_len)
+            scores_head = self.kernels[head_idx](q_head, k_head)
+            attention_scores_list.append(scores_head)
+        
+        # Concatenate all heads: (batch, num_heads, seq_len, seq_len)
+        attention_scores = torch.cat(attention_scores_list, dim=1)
+        
+        # Apply attention mask if provided
+        if attention_mask is not None:
+            # attention_mask shape: (batch, 1, 1, seq_len) or (batch, 1, seq_len, seq_len)
+            # Convert 0/1 mask to additive mask: 0 -> 0, 1 -> -inf
+            attention_scores = attention_scores + (attention_mask * -1e9)
+        
+        # Apply softmax to get attention weights
+        # Shape: (batch, num_heads, seq_len, seq_len)
+        attention_weights = torch.softmax(attention_scores, dim=-1)
+        attention_weights = self.dropout(attention_weights)
+        
+        # Apply attention to values
+        # (batch, num_heads, seq_len, seq_len) @ (batch, num_heads, seq_len, head_dim)
+        # -> (batch, num_heads, seq_len, head_dim)
+        context = torch.matmul(attention_weights, v)
+        
+        # Reshape back to (batch, seq_len, hidden_size)
+        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
+        
+        # Apply output projection
+        output = self.out_proj(context)
+        
+        if output_attentions:
+            return (output, attention_weights)
+        else:
+            return (output,)
+    
+    def extra_repr(self) -> str:
+        """String representation for debugging."""
+        return (
+            f"hidden_size={self.hidden_size}, "
+            f"num_heads={self.num_heads}, "
+            f"head_dim={self.head_dim}"
+        )
