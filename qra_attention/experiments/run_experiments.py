@@ -119,13 +119,7 @@ def main():
             
         # 2. Aggregate
         print(f"Aggregating results for {model}...")
-        
-        if args.smoke_test:
-            results_path = os.path.join(base_results_dir, "smoke_test")
-        else:
-            results_path = output_dir
-            
-        df, summary = aggregate_results(results_path, current_seeds, model)
+        df, summary = aggregate_results(output_dir, current_seeds, model)
         
         if df is not None:
             all_detail_records.append(df)

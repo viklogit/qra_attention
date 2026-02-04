@@ -9,7 +9,7 @@ from typing import Optional
 class ExperimentConfig:
     # Model
     model_name: str = "distilbert-base-uncased"
-    max_length: int = 512
+    max_length: int = 256
     num_labels: int = 2
     
     # Training

@@ -57,7 +57,7 @@ def main():
         print("!!! RUNNING SMOKE TEST !!!")
         config.num_epochs = 1
         config.logging_dir = "logs/smoke_test_rff"
-        args.output_dir = "results/smoke_test_rff"
+        # Don't override output_dir - respect argument from run_experiments.py
     
     print(f"Loading model: {config.model_name}")
     print(f"Output directory: {args.output_dir}")
