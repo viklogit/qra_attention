@@ -32,6 +32,8 @@ class KernelSelfAttention(nn.Module):
         hidden_size (int): Dimension of hidden states
         num_heads (int): Number of attention heads
         dropout (float): Dropout probability (default: 0.1)
+        alpha (float): Interpolation factor (default: 0.9)
+            0.9 means 90% dot-product, 10% kernel.
         kernel_config (dict): Configuration for RFF kernel
             - num_features (int): Number of random features (m)
             - sigma (float): Kernel bandwidth
@@ -51,6 +53,7 @@ class KernelSelfAttention(nn.Module):
         hidden_size: int,
         num_heads: int,
         dropout: float = 0.1,
+        alpha: float = 0.9,
         kernel_config: Optional[Dict[str, Any]] = None
     ):
         super().__init__()
@@ -61,6 +64,7 @@ class KernelSelfAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
         self.dropout = nn.Dropout(dropout)
+        self.alpha = alpha
         
         # Q, K, V projections (standard)
         self.q_proj = nn.Linear(hidden_size, hidden_size)
@@ -123,21 +127,37 @@ class KernelSelfAttention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         
+        # FIX 2: Unit-norm Q and K to restore angular meaning for kernel
+        # Shape: (batch, num_heads, seq_len, head_dim)
+        q_normed = q / (q.norm(dim=-1, keepdim=True) + 1e-6)
+        k_normed = k / (k.norm(dim=-1, keepdim=True) + 1e-6)
+        
+        # Compute standard dot-product similarity (Raw QK^T)
+        # Shape: (batch, num_heads, seq_len, seq_len)
+        dot_scores = torch.matmul(q, k.transpose(-2, -1))
+        
         # Compute kernel similarity per head
-        # We need to apply each kernel to its corresponding head
-        attention_scores_list = []
+        kernel_scores_list = []
         
         for head_idx in range(self.num_heads):
-            # Extract Q, K for this head: (batch, seq_len, head_dim)
-            q_head = q[:, head_idx, :, :].unsqueeze(1)  # (batch, 1, seq_len, head_dim)
-            k_head = k[:, head_idx, :, :].unsqueeze(1)  # (batch, 1, seq_len, head_dim)
+            # Use normed Q, K for kernel similarity: (batch, seq_len, head_dim)
+            q_head = q_normed[:, head_idx, :, :].unsqueeze(1)
+            k_head = k_normed[:, head_idx, :, :].unsqueeze(1)
             
             # Compute kernel similarity: (batch, 1, seq_len, seq_len)
             scores_head = self.kernels[head_idx](q_head, k_head)
-            attention_scores_list.append(scores_head)
+            kernel_scores_list.append(scores_head)
         
         # Concatenate all heads: (batch, num_heads, seq_len, seq_len)
-        attention_scores = torch.cat(attention_scores_list, dim=1)
+        kernel_scores = torch.cat(kernel_scores_list, dim=1)
+        
+        # FIX 1: Hybrid Blending
+        # Preservation of pretrained inductive bias + geometric refinement
+        attention_scores = self.alpha * dot_scores + (1 - self.alpha) * kernel_scores
+        
+        # FIX 4: Temperature Scaling
+        # Mirror the sqrt(d_k) scaling of standard attention
+        attention_scores = attention_scores / math.sqrt(self.head_dim)
         
         # Apply attention mask if provided
         if attention_mask is not None:
@@ -171,5 +191,6 @@ class KernelSelfAttention(nn.Module):
         return (
             f"hidden_size={self.hidden_size}, "
             f"num_heads={self.num_heads}, "
-            f"head_dim={self.head_dim}"
+            f"head_dim={self.head_dim}, "
+            f"alpha={self.alpha}"
         )

@@ -45,6 +45,7 @@ def main():
     # RFF Specific Arguments
     parser.add_argument("--num_features", type=int, default=64, help="Number of random features")
     parser.add_argument("--sigma", type=float, default=1.0, help="RBF kernel bandwidth sigma")
+    parser.add_argument("--alpha", type=float, default=0.9, help="Hybrid blending alpha (default: 0.9)")
     
     args = parser.parse_args()
     
@@ -61,7 +62,7 @@ def main():
     
     print(f"Loading model: {config.model_name}")
     print(f"Output directory: {args.output_dir}")
-    print(f"Configuration: RFF features={args.num_features}, sigma={args.sigma}")
+    print(f"Configuration: RFF features={args.num_features}, sigma={args.sigma}, alpha={args.alpha}")
     
     # 2. Data Loading
     print("Loading IMDb dataset...")
@@ -96,13 +97,14 @@ def main():
     kernel_config = {
         "num_features": args.num_features,
         "sigma": args.sigma,
-        "normalize": False # Softmax handles normalization
+        "normalize": True # FIX 3: Enable feature normalization
     }
     
     patched_model = patch_distilbert_attention(
         model, 
         kernel_config=kernel_config,
-        layers_to_patch=[4, 5] # Patch last two layers
+        layers_to_patch=[4, 5], # Patch last two layers
+        alpha=args.alpha # FIX 1: Pass blending factor
     )
     
     # 5. Freezing
@@ -154,6 +156,7 @@ def main():
     eval_results["kernel_type"] = "rff"
     eval_results["num_features"] = args.num_features
     eval_results["sigma"] = args.sigma
+    eval_results["alpha"] = args.alpha
     
     print(f"Evaluation Results: {eval_results}")
     

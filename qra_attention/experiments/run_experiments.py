@@ -53,7 +53,9 @@ def aggregate_results(results_dir, seeds, experiment_name):
             "f1": data.get("eval_f1"),
             "loss": data.get("eval_loss"),
             "runtime": data.get("eval_runtime"),
-            "samples_per_second": data.get("eval_samples_per_second")
+            "samples_per_second": data.get("eval_samples_per_second"),
+            "alpha": data.get("alpha"),
+            "num_features": data.get("num_features")
         }
         records.append(record)
         
@@ -79,6 +81,8 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke_test", action="store_true", help="Run quick smoke test")
+    parser.add_argument("--alpha", type=float, default=0.9, help="Interpolation factor for RFF")
+    parser.add_argument("--num_features", type=int, default=128, help="Number of random features")
     args = parser.parse_args()
     
     base_results_dir = "results"
@@ -113,6 +117,10 @@ def main():
             
             if args.smoke_test:
                 cmd.append("--smoke_test")
+            
+            if model == "rff":
+                cmd.extend(["--alpha", str(args.alpha)])
+                cmd.extend(["--num_features", str(args.num_features)])
                 
             print(f"Executing: {' '.join(cmd)}")
             subprocess.run(cmd, check=True)

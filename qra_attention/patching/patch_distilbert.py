@@ -90,7 +90,8 @@ class KernelAttentionWrapper(nn.Module):
 def patch_distilbert_attention(
     model: nn.Module,
     layers_to_patch: List[int],
-    kernel_config: Optional[Dict[str, Any]] = None
+    kernel_config: Optional[Dict[str, Any]] = None,
+    alpha: float = 0.9
 ) -> nn.Module:
     """
     Replace attention in specified DistilBERT layers with kernel attention.
@@ -141,6 +142,7 @@ def patch_distilbert_attention(
             hidden_size=hidden_size,
             num_heads=num_heads,
             dropout=config.attention_dropout,
+            alpha=alpha,
             kernel_config=kernel_config
         )
         
