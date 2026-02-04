@@ -150,7 +150,10 @@ class KernelSelfAttention(nn.Module):
         
         # Concatenate all heads: (batch, num_heads, seq_len, seq_len)
         kernel_scores = torch.cat(kernel_scores_list, dim=1)
-        
+        if not self.training:
+            print(f"Dot scores: {dot_scores.mean():.4f} ± {dot_scores.std():.4f}")
+            print(f"Kernel scores: {kernel_scores.mean():.4f} ± {kernel_scores.std():.4f}")
+            print(f"Blended scores: {attention_scores.mean():.4f} ± {attention_scores.std():.4f}")
         # FIX 1: Hybrid Blending
         # Preservation of pretrained inductive bias + geometric refinement
         attention_scores = self.alpha * dot_scores + (1 - self.alpha) * kernel_scores
