@@ -11,7 +11,7 @@ import numpy as np
 from datetime import datetime
 
 SEEDS = [13, 42, 1234]
-MODELS = ["baseline"] # Will add "kernel" later
+MODELS = ["baseline", "rff"]
 
 def run_training_script(script_name, seed, output_base, no_save_model=True):
     """Run a single training script with a specific seed."""

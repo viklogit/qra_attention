@@ -1,13 +1,13 @@
 """
-Script to train the baseline DistilBERT model on IMDb.
-This establishes the performance benchmark for standard attention
-under the same freezing constraints as the kernel experiments.
+Script to train DistilBERT with RFF Kernel Attention on IMDb.
+Patches layers L4 and L5 with KernelSelfAttention.
 """
 
 import os
 import argparse
 import numpy as np
 import torch
+import json
 from transformers import (
     DistilBertForSequenceClassification,
     DistilBertTokenizer,
@@ -19,8 +19,7 @@ import evaluate
 from datasets import load_dataset
 
 from qra_attention.experiments.config import ExperimentConfig
-from qra_attention.patching import freeze_layers, get_trainable_params_summary
-
+from qra_attention.patching import patch_distilbert_attention, freeze_layers
 
 def compute_metrics(eval_pred):
     """Compute accuracy and F1 score."""
@@ -35,19 +34,18 @@ def compute_metrics(eval_pred):
     
     return {"accuracy": acc["accuracy"], "f1": f1_score["f1"]}
 
-
 def main():
-    parser = argparse.ArgumentParser(description="Train baseline DistilBERT on IMDb")
-    parser.add_argument("--output_dir", type=str, default=ExperimentConfig.output_dir, 
-                        help="Output directory")
-    parser.add_argument("--batch_size", type=int, default=ExperimentConfig.batch_size, 
-                        help="Batch size")
-    parser.add_argument("--seed", type=int, default=ExperimentConfig.seed, 
-                        help="Random seed")
-    parser.add_argument("--no_save_model", action="store_true", 
-                        help="Do not save the model checkpoint (to save space)")
-    parser.add_argument("--smoke_test", action="store_true", 
-                        help="Run a quick smoke test with minimal data")
+    parser = argparse.ArgumentParser(description="Train RFF Kernel DistilBERT on IMDb")
+    parser.add_argument("--output_dir", type=str, default="results/rff", help="Output directory")
+    parser.add_argument("--batch_size", type=int, default=ExperimentConfig.batch_size, help="Batch size")
+    parser.add_argument("--seed", type=int, default=ExperimentConfig.seed, help="Random seed")
+    parser.add_argument("--no_save_model", action="store_true", help="Do not save the model checkpoint")
+    parser.add_argument("--smoke_test", action="store_true", help="Run a quick smoke test")
+    
+    # RFF Specific Arguments
+    parser.add_argument("--num_features", type=int, default=64, help="Number of random features")
+    parser.add_argument("--sigma", type=float, default=1.0, help="RBF kernel bandwidth sigma")
+    
     args = parser.parse_args()
     
     # 1. Setup
@@ -58,13 +56,14 @@ def main():
     if args.smoke_test:
         print("!!! RUNNING SMOKE TEST !!!")
         config.num_epochs = 1
-        config.logging_dir = "logs/smoke_test"
-        # FIX: Don't override output_dir - respect the argument
-
+        config.logging_dir = "logs/smoke_test_rff"
+        args.output_dir = "results/smoke_test_rff"
+    
     print(f"Loading model: {config.model_name}")
     print(f"Output directory: {args.output_dir}")
+    print(f"Configuration: RFF features={args.num_features}, sigma={args.sigma}")
     
-    # 2. Data Loading & Tokenization
+    # 2. Data Loading
     print("Loading IMDb dataset...")
     dataset = load_dataset("imdb")
     tokenizer = DistilBertTokenizer.from_pretrained(config.model_name)
@@ -81,7 +80,7 @@ def main():
     if args.smoke_test:
         dataset["train"] = dataset["train"].select(range(20))
         dataset["test"] = dataset["test"].select(range(10))
-        print("  Truncated dataset for smoke test: 20 train, 10 test")
+        print("  Truncated dataset for smoke test")
         
     tokenized_datasets = dataset.map(tokenize_function, batched=True)
     
@@ -92,10 +91,24 @@ def main():
         num_labels=config.num_labels
     )
     
-    # 4. Apply Freezing (Baseline Constraint)
+    # 4. Patching with Kernel Attention
+    print("Patching attention layers...")
+    kernel_config = {
+        "num_features": args.num_features,
+        "sigma": args.sigma,
+        "normalize": False # Softmax handles normalization
+    }
+    
+    patched_model = patch_distilbert_attention(
+        model, 
+        kernel_config=kernel_config,
+        layers_to_patch=[4, 5] # Patch last two layers
+    )
+    
+    # 5. Freezing
     print("Applying freezing constraints...")
     freeze_summary = freeze_layers(
-        model, 
+        patched_model, 
         freeze_embeddings=config.freeze_embeddings, 
         freeze_layer_indices=list(config.freeze_layers)
     )
@@ -105,7 +118,7 @@ def main():
     print(f"  Trainable: {freeze_summary['trainable_params']:,}")
     print(f"  Frozen: {freeze_summary['frozen_params']:,}")
     
-    # 5. Training Setup
+    # 6. Training Setup
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         learning_rate=config.learning_rate,
@@ -118,30 +131,33 @@ def main():
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
         seed=config.seed,
-        fp16=torch.cuda.is_available(),  # FIX: Only use FP16 on GPU
+        fp16=torch.cuda.is_available(),
     )
     
     trainer = Trainer(
-        model=model,
+        model=patched_model,
         args=training_args,
         train_dataset=tokenized_datasets["train"],
         eval_dataset=tokenized_datasets["test"],
         compute_metrics=compute_metrics,
     )
     
-    # 6. Train
+    # 7. Train
     print("Starting training...")
     trainer.train()
     
-    # 7. Evaluate
+    # 8. Evaluate
     print("Evaluating...")
     eval_results = trainer.evaluate()
+    
+    # Add metadata to results
+    eval_results["kernel_type"] = "rff"
+    eval_results["num_features"] = args.num_features
+    eval_results["sigma"] = args.sigma
+    
     print(f"Evaluation Results: {eval_results}")
     
-    # 8. Save
-    import json
-    
-    # Save metrics
+    # 9. Save
     os.makedirs(args.output_dir, exist_ok=True)
     metrics_file = os.path.join(args.output_dir, f"seed_{config.seed}.json")
     
@@ -155,10 +171,9 @@ def main():
         trainer.save_model(seed_output_dir)
         tokenizer.save_pretrained(seed_output_dir)
     else:
-        print("Skipping model save (--no_save_model used)")
+        print("Skipping model save")
         
     print("Done!")
-
 
 if __name__ == "__main__":
     main()

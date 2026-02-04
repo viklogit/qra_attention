@@ -40,7 +40,9 @@ class KernelAttentionWrapper(nn.Module):
         value: Optional[torch.Tensor] = None,
         mask: Optional[torch.Tensor] = None,
         head_mask: Optional[torch.Tensor] = None,
-        output_attentions: bool = False
+        output_attentions: bool = False,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs
     ):
         """
         Forward pass matching DistilBERT attention interface.
@@ -74,9 +76,15 @@ class KernelAttentionWrapper(nn.Module):
             # Reshape to (batch, 1, 1, seq_len) for broadcasting
             attention_mask = mask.unsqueeze(1).unsqueeze(2)
         
-        # Call kernel attention (it expects hidden_states, not separate q/k/v)
-        # Since this is self-attention, query = key = value
-        return self.kernel_attention(query, attention_mask, output_attentions)
+        # Call kernel attention
+        outputs = self.kernel_attention(query, attention_mask, output_attentions)
+        
+        # DistilBERT expects (attention_output, attention_probs)
+        # Our KernelSelfAttention returns (output, weights) or (output,)
+        if output_attentions:
+            return outputs
+        else:
+            return (outputs[0], None)
 
 
 def patch_distilbert_attention(
