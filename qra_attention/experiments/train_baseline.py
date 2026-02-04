@@ -38,11 +38,14 @@ def main():
     parser = argparse.ArgumentParser(description="Train baseline DistilBERT on IMDb")
     parser.add_argument("--output_dir", type=str, default=ExperimentConfig.output_dir, help="Output directory")
     parser.add_argument("--batch_size", type=int, default=ExperimentConfig.batch_size, help="Batch size")
+    parser.add_argument("--seed", type=int, default=ExperimentConfig.seed, help="Random seed")
+    parser.add_argument("--no_save_model", action="store_true", help="Do not save the model checkpoint (to save space)")
     parser.add_argument("--smoke_test", action="store_true", help="Run a quick smoke test with minimal data")
     args = parser.parse_args()
     
     # 1. Setup
     config = ExperimentConfig()
+    config.seed = args.seed  # Override seed from args
     set_seed(config.seed)
     
     if args.smoke_test:
@@ -50,7 +53,14 @@ def main():
         config.num_epochs = 1
         config.logging_dir = "logs/smoke_test"
         args.output_dir = "results/smoke_test"
-    
+    else:
+        # Standard run structure: results/baseline/seed_{seed}
+        # But user asked for flat files: results/baseline/seed_{seed}.json
+        # So we keep output_dir as base folder, but we'll use specific paths for saving files.
+        # Actually, Trainer needs a directory. Let's make a subdir per seed to be safe given Trainer conventions,
+        # or we just save the JSON specially at the end.
+        pass
+
     print(f"Loading model: {config.model_name}")
     print(f"Output directory: {args.output_dir}")
     
@@ -130,9 +140,25 @@ def main():
     print(f"Evaluation Results: {eval_results}")
     
     # 8. Save
-    print("Saving model...")
-    trainer.save_model(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
+    import json
+    
+    # Save metrics to specific JSON file requested: results/baseline/seed_{seed}.json
+    # Ensure output directory exists provided by args.output_dir
+    os.makedirs(args.output_dir, exist_ok=True)
+    metrics_file = os.path.join(args.output_dir, f"seed_{config.seed}.json")
+    
+    with open(metrics_file, "w") as f:
+        json.dump(eval_results, f, indent=4)
+    print(f"Saved metrics to {metrics_file}")
+    
+    if not args.no_save_model:
+        print("Saving model...")
+        seed_output_dir = os.path.join(args.output_dir, f"checkpoint-seed-{config.seed}")
+        trainer.save_model(seed_output_dir)
+        tokenizer.save_pretrained(seed_output_dir)
+    else:
+        print("Skipping model save (--no_save_model used)")
+        
     print("Done!")
 
 if __name__ == "__main__":
