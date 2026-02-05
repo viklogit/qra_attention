@@ -118,7 +118,8 @@ def main():
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
         seed=config.seed,
-        fp16=torch.cuda.is_available(),  # FIX: Only use FP16 on GPU
+        fp16=torch.cuda.is_available(),
+        report_to="none",
     )
     
     trainer = Trainer(

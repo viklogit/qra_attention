@@ -134,6 +134,7 @@ def main():
         logging_dir=config.logging_dir,
         seed=config.seed,
         fp16=torch.cuda.is_available(),
+        report_to="none",
     )
     
     trainer = Trainer(
