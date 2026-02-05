@@ -83,6 +83,7 @@ def main():
     parser.add_argument("--smoke_test", action="store_true", help="Run quick smoke test")
     parser.add_argument("--alpha", type=float, default=0.9, help="Interpolation factor for RFF")
     parser.add_argument("--num_features", type=int, default=128, help="Number of random features")
+    parser.add_argument("--sigma", type=float, default=2.0, help="Kernel bandwidth sigma")
     parser.add_argument("--save_models", action="store_true", help="Save model checkpoints (required for robustness eval)")
     args = parser.parse_args()
     
@@ -124,6 +125,7 @@ def main():
             if model == "rff":
                 cmd.extend(["--alpha", str(args.alpha)])
                 cmd.extend(["--num_features", str(args.num_features)])
+                cmd.extend(["--sigma", str(args.sigma)])
                 
             print(f"Executing: {' '.join(cmd)}")
             subprocess.run(cmd, check=True)
