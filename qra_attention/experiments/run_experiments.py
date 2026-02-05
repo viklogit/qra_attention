@@ -85,6 +85,7 @@ def main():
     parser.add_argument("--num_features", type=int, default=128, help="Number of random features")
     parser.add_argument("--sigma", type=float, default=2.0, help="Kernel bandwidth sigma")
     parser.add_argument("--save_models", action="store_true", help="Save model checkpoints (required for robustness eval)")
+    parser.add_argument("--use_accelerate", action="store_true", help="Use 'accelerate launch' for training scripts")
     args = parser.parse_args()
     
     base_results_dir = "results"
@@ -109,12 +110,16 @@ def main():
             print(f"\n--- Seed {seed} ---")
             
             # Prepare command
-            cmd = [
-                sys.executable,
+            if args.use_accelerate:
+                cmd = ["accelerate", "launch"]
+            else:
+                cmd = [sys.executable]
+            
+            cmd.extend([
                 f"qra_attention/experiments/{script_name}",
                 "--seed", str(seed),
                 "--output_dir", output_dir
-            ]
+            ])
             
             if not args.save_models:
                 cmd.append("--no_save_model")
