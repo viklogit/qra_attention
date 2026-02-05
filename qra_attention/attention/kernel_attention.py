@@ -167,8 +167,8 @@ class KernelSelfAttention(nn.Module):
         # Apply attention mask if provided
         if attention_mask is not None:
             # attention_mask shape: (batch, 1, 1, seq_len) or (batch, 1, seq_len, seq_len)
-            # Convert 0/1 mask to additive mask: 0 -> 0, 1 -> -inf
-            attention_scores = attention_scores + (attention_mask * -1e9)
+            # Convert 0/1 mask to additive mask: 0 -> 0, 1 -> -1e4 (for FP16 safety)
+            attention_scores = attention_scores + (attention_mask * -1e4)
         
         # Apply softmax to get attention weights
         # Shape: (batch, num_heads, seq_len, seq_len)

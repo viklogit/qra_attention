@@ -148,6 +148,9 @@ if __name__ == "__main__":
     parser.add_argument("--alpha", type=float, default=0.9, help="Hybrid blending alpha")
     args = parser.parse_args()
     
+    # Ensure output dir exists
+    os.makedirs("results", exist_ok=True)
+    
     setup_nltk()
     
     # 1. Setup paths
