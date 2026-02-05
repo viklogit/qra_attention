@@ -83,6 +83,7 @@ def main():
     parser.add_argument("--smoke_test", action="store_true", help="Run quick smoke test")
     parser.add_argument("--alpha", type=float, default=0.9, help="Interpolation factor for RFF")
     parser.add_argument("--num_features", type=int, default=128, help="Number of random features")
+    parser.add_argument("--save_models", action="store_true", help="Save model checkpoints (required for robustness eval)")
     args = parser.parse_args()
     
     base_results_dir = "results"
@@ -111,9 +112,11 @@ def main():
                 sys.executable,
                 f"qra_attention/experiments/{script_name}",
                 "--seed", str(seed),
-                "--output_dir", output_dir,
-                "--no_save_model"
+                "--output_dir", output_dir
             ]
+            
+            if not args.save_models:
+                cmd.append("--no_save_model")
             
             if args.smoke_test:
                 cmd.append("--smoke_test")
