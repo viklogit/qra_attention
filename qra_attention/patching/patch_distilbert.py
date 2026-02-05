@@ -146,13 +146,25 @@ def patch_distilbert_attention(
             kernel_config=kernel_config
         )
         
+        # Copy weights from original attention (IMPORTANT for pretrained models)
+        print(f"  Copying weights from layer {layer_idx}...")
+        with torch.no_grad():
+            kernel_attn.q_proj.weight.copy_(layer.attention.q_lin.weight)
+            kernel_attn.q_proj.bias.copy_(layer.attention.q_lin.bias)
+            kernel_attn.k_proj.weight.copy_(layer.attention.k_lin.weight)
+            kernel_attn.k_proj.bias.copy_(layer.attention.k_lin.bias)
+            kernel_attn.v_proj.weight.copy_(layer.attention.v_lin.weight)
+            kernel_attn.v_proj.bias.copy_(layer.attention.v_lin.bias)
+            kernel_attn.out_proj.weight.copy_(layer.attention.out_lin.weight)
+            kernel_attn.out_proj.bias.copy_(layer.attention.out_lin.bias)
+
         # Wrap for compatibility
         wrapped_attn = KernelAttentionWrapper(kernel_attn)
         
         # Replace the attention module
         layer.attention = wrapped_attn
         
-        print(f"✓ Patched layer {layer_idx} with KernelSelfAttention")
+        print(f"Patched layer {layer_idx} with KernelSelfAttention")
     
     return model
 
@@ -196,7 +208,7 @@ def freeze_layers(
         for param in base_model.embeddings.parameters():
             param.requires_grad = False
             frozen_count += param.numel()
-        print(f"✓ Froze embeddings")
+        print(f"Froze embeddings")
     
     # Freeze specified layers
     for layer_idx in freeze_layer_indices:
@@ -204,7 +216,7 @@ def freeze_layers(
         for param in layer.parameters():
             param.requires_grad = False
             frozen_count += param.numel()
-        print(f"✓ Froze layer {layer_idx}")
+        print(f"Froze layer {layer_idx}")
     
     # Count trainable parameters
     for param in model.parameters():
