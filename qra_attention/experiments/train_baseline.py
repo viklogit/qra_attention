@@ -113,7 +113,7 @@ def main():
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=config.num_epochs,
         weight_decay=config.weight_decay,
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
