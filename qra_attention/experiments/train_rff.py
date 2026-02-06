@@ -133,7 +133,7 @@ def main():
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
         seed=config.seed,
-        fp16=torch.cuda.is_available(),
+        fp16=False,
         max_grad_norm=1.0,
         warmup_ratio=config.warmup_ratio,
         lr_scheduler_type="cosine",

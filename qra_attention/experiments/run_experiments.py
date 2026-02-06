@@ -123,17 +123,13 @@ def main():
         for seed in current_seeds:
             print(f"\n--- Seed {seed} ---")
             
-            # Prepare command
-            if args.use_accelerate:
-                cmd = ["accelerate", "launch"]
-            else:
-                cmd = [sys.executable]
-            
-            cmd.extend([
+            # Prepare command (Standard python for stability)
+            cmd = [
+                sys.executable,
                 f"qra_attention/experiments/{script_name}",
                 "--seed", str(seed),
                 "--output_dir", output_dir
-            ])
+            ]
             
             if not args.save_models:
                 cmd.append("--no_save_model")
