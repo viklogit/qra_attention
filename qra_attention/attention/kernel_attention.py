@@ -181,7 +181,13 @@ class KernelSelfAttention(nn.Module):
         context = torch.matmul(attention_weights, v)
         
         # Reshape back to (batch, seq_len, hidden_size)
-        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.hidden_size)
+        # Use -1 for batch dimension to be robust against DDP/Gather behaviors
+        context = context.transpose(1, 2).contiguous()
+        context = context.view(-1, seq_len, self.hidden_size)
+        
+        # Guard: Ensure we return the expected local batch size
+        if context.size(0) > batch_size:
+            context = context[:batch_size]
         
         # Apply output projection
         output = self.out_proj(context)

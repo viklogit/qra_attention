@@ -118,6 +118,13 @@ class RFFKernel(nn.Module):
         # Result: (batch, num_heads, seq_len_q, seq_len_k)
         similarity = torch.matmul(phi_q, phi_k.transpose(-2, -1))
         
+        # Explicitly enforce 4D shape to avoid DDP broadcasting inflation
+        batch_size = q.size(0)
+        num_heads = q.size(1)
+        seq_len_q = q.size(2)
+        seq_len_k = k.size(2)
+        similarity = similarity.view(batch_size, num_heads, seq_len_q, seq_len_k)
+        
         return similarity
     
     def extra_repr(self) -> str:
