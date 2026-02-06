@@ -95,7 +95,7 @@ class RFFKernel(nn.Module):
         features = self.scale * torch.cos(projection)
         
         if self.normalize:
-            features = features / (features.norm(dim=-1, keepdim=True) + 1e-8)
+            features = features / (features.norm(dim=-1, keepdim=True) + 1e-5)
         
         return features
 

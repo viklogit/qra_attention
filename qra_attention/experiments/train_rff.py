@@ -134,6 +134,9 @@ def main():
         logging_dir=config.logging_dir,
         seed=config.seed,
         fp16=torch.cuda.is_available(),
+        max_grad_norm=1.0,
+        warmup_ratio=config.warmup_ratio,
+        lr_scheduler_type="cosine",
         report_to="none",
     )
     

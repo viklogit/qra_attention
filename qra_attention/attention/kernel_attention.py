@@ -127,8 +127,8 @@ class KernelSelfAttention(nn.Module):
         
         # FIX 2: Unit-norm Q and K to restore angular meaning for kernel
         # Shape: (batch, num_heads, seq_len, head_dim)
-        q_normed = q / (q.norm(dim=-1, keepdim=True) + 1e-6)
-        k_normed = k / (k.norm(dim=-1, keepdim=True) + 1e-6)
+        q_normed = q / (q.norm(dim=-1, keepdim=True) + 1e-5)
+        k_normed = k / (k.norm(dim=-1, keepdim=True) + 1e-5)
         
         # Compute standard dot-product similarity (Raw QK^T)
         # Shape: (batch, num_heads, seq_len, seq_len)

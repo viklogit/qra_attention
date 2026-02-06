@@ -86,6 +86,7 @@ def main():
     parser.add_argument("--sigma", type=float, default=2.0, help="Kernel bandwidth sigma")
     parser.add_argument("--save_models", action="store_true", help="Save model checkpoints (required for robustness eval)")
     parser.add_argument("--use_accelerate", action="store_true", help="Use 'accelerate launch' for training scripts")
+    parser.add_argument("--model", type=str, choices=["baseline", "rff", "all"], default="all", help="Model type to run (default: all)")
     args = parser.parse_args()
     
     # SAFETY GUARD: Prevent running this script with 'accelerate launch'
@@ -109,7 +110,11 @@ def main():
         print("!!! SMOKE TEST MODE: Running only seed 13 for 1 epoch !!!")
         current_seeds = [13]
     
-    for model in MODELS:
+    current_models = MODELS
+    if args.model != "all":
+        current_models = [args.model]
+    
+    for model in current_models:
         print(f"\n{'='*20}\nRunning Experiment: {model}\n{'='*20}")
         script_name = f"train_{model}.py"
         output_dir = os.path.join(base_results_dir, model)
