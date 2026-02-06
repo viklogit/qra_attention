@@ -88,6 +88,15 @@ def main():
     parser.add_argument("--use_accelerate", action="store_true", help="Use 'accelerate launch' for training scripts")
     args = parser.parse_args()
     
+    # SAFETY GUARD: Prevent running this script with 'accelerate launch'
+    # The runner should be a single process that launches distributed sub-tasks.
+    if os.environ.get("RANK") is not None or os.environ.get("LOCAL_RANK") is not None:
+        print("\n❌ CRITICAL ERROR: Do not run 'run_experiments.py' with 'accelerate launch'.")
+        print("The runner script manages the experiment sweep and should be run with standard 'python'.")
+        print("To use GPUs, the runner will call 'accelerate' internally on the training scripts.")
+        print("\n✅ CORRECT USAGE: python qra_attention/experiments/run_experiments.py --use_accelerate ...\n")
+        sys.exit(1)
+    
     base_results_dir = "results"
     os.makedirs(base_results_dir, exist_ok=True)
     

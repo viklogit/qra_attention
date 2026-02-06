@@ -13,7 +13,7 @@ class ExperimentConfig:
     num_labels: int = 2
     
     # Training
-    batch_size: int = 32  # Adjusted for memory (use 16 if OOM)
+    batch_size: int = 16  # Reduced for T4 stability with RFF
     learning_rate: float = 2e-5
     num_epochs: int = 3
     weight_decay: float = 0.01

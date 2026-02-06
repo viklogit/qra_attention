@@ -48,6 +48,7 @@ class RFFKernel(nn.Module):
         self,
         input_dim: int,
         num_features: int,
+        num_heads: int = 12,
         sigma: float = 1.0,
         device: str = "cpu",
         normalize: bool = True
@@ -56,74 +57,58 @@ class RFFKernel(nn.Module):
         
         self.input_dim = input_dim
         self.num_features = num_features
+        self.num_heads = num_heads
         self.sigma = sigma
         self.normalize = normalize
         self.scale = math.sqrt(2.0 / num_features)
         
         # Sample W from N(0, σ⁻²)
-        # Using fixed random features (not trainable)
-        W = torch.randn(num_features, input_dim, device=device) / sigma
+        # Shape: (num_heads, num_features, input_dim)
+        W = torch.randn(num_heads, num_features, input_dim, device=device) / sigma
         self.register_buffer('W', W)
         
         # Sample b from Uniform(0, 2π)
-        b = torch.rand(num_features, device=device) * 2 * math.pi
+        # Shape: (num_heads, num_features)
+        b = torch.rand(num_heads, num_features, device=device) * 2 * math.pi
         self.register_buffer('b', b)
     
     def phi(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Compute the RFF feature map φ(x).
-        
-        φ(x) = √(2/m) cos(Wx + b)
+        Compute the RFF feature map φ(x) in a vectorized manner over multiple heads.
         
         Args:
-            x (torch.Tensor): Input tensor of shape (..., input_dim)
+            x (torch.Tensor): Input tensor of shape (batch, heads, seq, input_dim)
             
         Returns:
-            torch.Tensor: Feature map of shape (..., num_features)
+            torch.Tensor: Feature map of shape (batch, heads, seq, num_features)
         """
-        # Compute Wx + b
-        # x: (..., input_dim), W: (num_features, input_dim)
-        # Result: (..., num_features)
-        projection = torch.matmul(x, self.W.t()) + self.b
+        # x: (B, H, L, D)
+        # W: (H, M, D) -> t() -> (H, D, M)
+        # b: (H, M) -> view -> (1, H, 1, M)
+        
+        # Batch matrix multiplication: (B, H, L, D) @ (H, D, M) -> (B, H, L, M)
+        # We need to use transpose correctly for the head-specific weights
+        W_t = self.W.transpose(1, 2)
+        projection = torch.matmul(x, W_t) + self.b.view(1, self.num_heads, 1, self.num_features)
         
         # Apply cosine and scale
         features = self.scale * torch.cos(projection)
         
-        # Optional: normalize to unit norm to prevent softmax saturation
         if self.normalize:
             features = features / (features.norm(dim=-1, keepdim=True) + 1e-8)
         
         return features
-    
+
     def forward(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
         """
-        Compute kernel similarity matrix S_ij = φ(q_i)ᵀ φ(k_j).
-        
-        This replaces the standard dot-product similarity in attention:
-            Standard: S_ij = q_iᵀ k_j / √d_k
-            RFF Kernel: S_ij = φ(q_i)ᵀ φ(k_j)
-        
-        Args:
-            q (torch.Tensor): Query tensor of shape (batch, num_heads, seq_len_q, input_dim)
-            k (torch.Tensor): Key tensor of shape (batch, num_heads, seq_len_k, input_dim)
-            
-        Returns:
-            torch.Tensor: Similarity matrix of shape (batch, num_heads, seq_len_q, seq_len_k)
+        Compute kernel similarity matrix S_ij = φ(q_i)ᵀ φ(k_j) vectorized over heads.
         """
-        # Compute feature maps
-        phi_q = self.phi(q)  # (batch, num_heads, seq_len_q, num_features)
-        phi_k = self.phi(k)  # (batch, num_heads, seq_len_k, num_features)
+        phi_q = self.phi(q)  # (batch, heads, seq_len_q, num_features)
+        phi_k = self.phi(k)  # (batch, heads, seq_len_k, num_features)
         
         # Compute similarity: φ(q) @ φ(k)ᵀ
-        # Result: (batch, num_heads, seq_len_q, seq_len_k)
+        # q: (B, H, L1, M), k: (B, H, L2, M) -> (B, H, L1, L2)
         similarity = torch.matmul(phi_q, phi_k.transpose(-2, -1))
-        
-        # Explicitly enforce 4D shape to avoid DDP broadcasting inflation
-        batch_size = q.size(0)
-        num_heads = q.size(1)
-        seq_len_q = q.size(2)
-        seq_len_k = k.size(2)
-        similarity = similarity.view(batch_size, num_heads, seq_len_q, seq_len_k)
         
         return similarity
     
