@@ -48,7 +48,6 @@ class RFFKernel(nn.Module):
         self,
         input_dim: int,
         num_features: int,
-        num_heads: int = 12,
         sigma: float = 1.0,
         device: str = "cpu",
         normalize: bool = True
@@ -57,39 +56,33 @@ class RFFKernel(nn.Module):
         
         self.input_dim = input_dim
         self.num_features = num_features
-        self.num_heads = num_heads
         self.sigma = sigma
         self.normalize = normalize
         self.scale = math.sqrt(2.0 / num_features)
         
         # Sample W from N(0, σ⁻²)
-        # Shape: (num_heads, num_features, input_dim)
-        W = torch.randn(num_heads, num_features, input_dim, device=device) / sigma
+        # Shape: (num_features, input_dim)
+        W = torch.randn(num_features, input_dim, device=device) / sigma
         self.register_buffer('W', W)
         
         # Sample b from Uniform(0, 2π)
-        # Shape: (num_heads, num_features)
-        b = torch.rand(num_heads, num_features, device=device) * 2 * math.pi
+        # Shape: (num_features,)
+        b = torch.rand(num_features, device=device) * 2 * math.pi
         self.register_buffer('b', b)
     
     def phi(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Compute the RFF feature map φ(x) in a vectorized manner over multiple heads.
+        Compute the RFF feature map φ(x).
         
         Args:
-            x (torch.Tensor): Input tensor of shape (batch, heads, seq, input_dim)
+            x (torch.Tensor): Input tensor of shape (..., input_dim)
             
         Returns:
-            torch.Tensor: Feature map of shape (batch, heads, seq, num_features)
+            torch.Tensor: Feature map of shape (..., num_features)
         """
-        # x: (B, H, L, D)
-        # W: (H, M, D) -> t() -> (H, D, M)
-        # b: (H, M) -> view -> (1, H, 1, M)
-        
-        # Batch matrix multiplication: (B, H, L, D) @ (H, D, M) -> (B, H, L, M)
-        # We need to use transpose correctly for the head-specific weights
-        W_t = self.W.transpose(1, 2)
-        projection = torch.matmul(x, W_t) + self.b.view(1, self.num_heads, 1, self.num_features)
+        # x: (..., D), W: (M, D) -> W.t() is (D, M)
+        # result: (..., M)
+        projection = torch.matmul(x, self.W.t()) + self.b
         
         # Apply cosine and scale
         features = self.scale * torch.cos(projection)
@@ -101,13 +94,12 @@ class RFFKernel(nn.Module):
 
     def forward(self, q: torch.Tensor, k: torch.Tensor) -> torch.Tensor:
         """
-        Compute kernel similarity matrix S_ij = φ(q_i)ᵀ φ(k_j) vectorized over heads.
+        Compute kernel similarity matrix S_ij = φ(q_i)ᵀ φ(k_j).
         """
-        phi_q = self.phi(q)  # (batch, heads, seq_len_q, num_features)
-        phi_k = self.phi(k)  # (batch, heads, seq_len_k, num_features)
+        phi_q = self.phi(q)  # (..., seq_len_q, num_features)
+        phi_k = self.phi(k)  # (..., seq_len_k, num_features)
         
         # Compute similarity: φ(q) @ φ(k)ᵀ
-        # q: (B, H, L1, M), k: (B, H, L2, M) -> (B, H, L1, L2)
         similarity = torch.matmul(phi_q, phi_k.transpose(-2, -1))
         
         return similarity

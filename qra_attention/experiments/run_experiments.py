@@ -87,6 +87,8 @@ def main():
     parser.add_argument("--save_models", action="store_true", help="Save model checkpoints (required for robustness eval)")
     parser.add_argument("--use_accelerate", action="store_true", help="Use 'accelerate launch' for training scripts")
     parser.add_argument("--model", type=str, choices=["baseline", "rff", "all"], default="all", help="Model type to run (default: all)")
+    parser.add_argument("--fp16", action="store_true", help="Use FP16 precision for training")
+    parser.add_argument("--learning_rate", type=float, help="Override default learning rate")
     args = parser.parse_args()
     
     # SAFETY GUARD: Prevent running this script with 'accelerate launch'
@@ -123,13 +125,23 @@ def main():
         for seed in current_seeds:
             print(f"\n--- Seed {seed} ---")
             
-            # Prepare command (Standard python for stability)
-            cmd = [
-                sys.executable,
+            # Prepare command
+            if args.use_accelerate:
+                cmd = ["accelerate", "launch"]
+            else:
+                cmd = [sys.executable]
+            
+            cmd.extend([
                 f"qra_attention/experiments/{script_name}",
                 "--seed", str(seed),
                 "--output_dir", output_dir
-            ]
+            ])
+            
+            if args.fp16:
+                cmd.append("--fp16")
+            
+            if args.learning_rate:
+                cmd.extend(["--learning_rate", str(args.learning_rate)])
             
             if not args.save_models:
                 cmd.append("--no_save_model")

@@ -48,6 +48,8 @@ def main():
                         help="Do not save the model checkpoint (to save space)")
     parser.add_argument("--smoke_test", action="store_true", 
                         help="Run a quick smoke test with minimal data")
+    parser.add_argument("--learning_rate", type=float, default=ExperimentConfig.learning_rate, help="Learning rate")
+    parser.add_argument("--fp16", action="store_true", help="Use FP16 precision")
     args = parser.parse_args()
     
     # 1. Setup
@@ -108,7 +110,7 @@ def main():
     # 5. Training Setup
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        learning_rate=config.learning_rate,
+        learning_rate=args.learning_rate,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=config.num_epochs,
@@ -118,7 +120,7 @@ def main():
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
         seed=config.seed,
-        fp16=False,
+        fp16=args.fp16,
         max_grad_norm=1.0,
         warmup_ratio=config.warmup_ratio,
         lr_scheduler_type="cosine",

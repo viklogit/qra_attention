@@ -13,8 +13,8 @@ class ExperimentConfig:
     num_labels: int = 2
     
     # Training
-    batch_size: int = 16  # Reduced for T4 stability with RFF
-    learning_rate: float = 5e-6  # Lowered specifically for RFF stability
+    batch_size: int = 32  # RESTORED (was 16)
+    learning_rate: float = 2e-5  # RESTORED (was 5e-6)
     num_epochs: int = 3
     weight_decay: float = 0.01
     warmup_ratio: float = 0.1
@@ -22,7 +22,7 @@ class ExperimentConfig:
     
     # Freezing
     freeze_embeddings: bool = True
-    freeze_layers: tuple = (0, 1, 2, 3)  # Layers to freeze
+    freeze_layers: tuple = (0, 1, 2, 3)
     
     # Paths
     output_dir: str = "results/baseline"

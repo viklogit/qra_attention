@@ -82,14 +82,16 @@ class KernelSelfAttention(nn.Module):
                 'normalize': True
             }
         
-        # Create a single RFF kernel for vectorized computation across all heads
-        self.kernel = RFFKernel(
-            input_dim=self.head_dim,
-            num_features=kernel_config.get('num_features', 128),
-            num_heads=self.num_heads,
-            sigma=kernel_config.get('sigma', 1.0),
-            normalize=kernel_config.get('normalize', True)
-        )
+        # Create one RFF kernel per attention head
+        self.kernels = nn.ModuleList([
+            RFFKernel(
+                input_dim=self.head_dim,
+                num_features=kernel_config.get('num_features', 128),
+                sigma=kernel_config.get('sigma', 1.0),
+                normalize=kernel_config.get('normalize', True)
+            )
+            for _ in range(num_heads)
+        ])
     
     def forward(
         self,
@@ -125,8 +127,7 @@ class KernelSelfAttention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         
-        # FIX 2: Unit-norm Q and K to restore angular meaning for kernel
-        # Shape: (batch, num_heads, seq_len, head_dim)
+        # FIX 1: Unit-norm Q/K for RBF Kernels
         q_normed = q / (q.norm(dim=-1, keepdim=True) + 1e-5)
         k_normed = k / (k.norm(dim=-1, keepdim=True) + 1e-5)
         
@@ -134,10 +135,24 @@ class KernelSelfAttention(nn.Module):
         # Shape: (batch, num_heads, seq_len, seq_len)
         dot_scores = torch.matmul(q, k.transpose(-2, -1))
         
-        # Compute kernel similarity vectorized over all heads
-        # Shape: (batch, num_heads, seq_len, seq_len)
-        kernel_scores = self.kernel(q_normed, k_normed)
-
+        # Compute kernel similarity by iterating over heads (proven stable)
+        kernel_scores_list = []
+        for head_idx in range(self.num_heads):
+            # (batch, 1, seq_len, head_dim)
+            q_head = q_normed[:, head_idx, :, :].unsqueeze(1)
+            k_head = k_normed[:, head_idx, :, :].unsqueeze(1)
+            
+            # Compute similarity for this head
+            # Shape: (batch, 1, seq_len, seq_len)
+            scores_head = self.kernels[head_idx](q_head, k_head)
+            kernel_scores_list.append(scores_head)
+            
+        # Concatenate back to (batch, num_heads, seq_len, seq_len)
+        kernel_scores = torch.cat(kernel_scores_list, dim=1)
+        
+        # Mirror the sqrt(d_k) scaling for kernels (if using dot-product like kernels)
+        # kernel_scores = kernel_scores / math.sqrt(self.head_dim)
+        
         # FIX 1: Hybrid Blending
         # Preservation of pretrained inductive bias + geometric refinement
         attention_scores = self.alpha * dot_scores + (1 - self.alpha) * kernel_scores

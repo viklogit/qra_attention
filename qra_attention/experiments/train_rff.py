@@ -46,6 +46,8 @@ def main():
     parser.add_argument("--num_features", type=int, default=64, help="Number of random features")
     parser.add_argument("--sigma", type=float, default=1.0, help="RBF kernel bandwidth sigma")
     parser.add_argument("--alpha", type=float, default=0.9, help="Hybrid blending alpha (default: 0.9)")
+    parser.add_argument("--learning_rate", type=float, default=ExperimentConfig.learning_rate, help="Learning rate")
+    parser.add_argument("--fp16", action="store_true", help="Use FP16 precision")
     
     args = parser.parse_args()
     
@@ -123,7 +125,7 @@ def main():
     # 6. Training Setup
     training_args = TrainingArguments(
         output_dir=args.output_dir,
-        learning_rate=config.learning_rate,
+        learning_rate=args.learning_rate,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         num_train_epochs=config.num_epochs,
@@ -133,7 +135,7 @@ def main():
         load_best_model_at_end=True,
         logging_dir=config.logging_dir,
         seed=config.seed,
-        fp16=False,
+        fp16=args.fp16,
         max_grad_norm=1.0,
         warmup_ratio=config.warmup_ratio,
         lr_scheduler_type="cosine",
