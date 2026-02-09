@@ -84,6 +84,10 @@ class RFFKernel(nn.Module):
         # result: (..., M)
         projection = torch.matmul(x, self.W.t()) + self.b
         
+        # FIX: Avoid cos(inf) which returns NaN
+        # Use a safe range for the cosine input
+        projection = torch.clamp(projection, -100.0, 100.0)
+        
         # Apply cosine and scale
         features = self.scale * torch.cos(projection)
         
