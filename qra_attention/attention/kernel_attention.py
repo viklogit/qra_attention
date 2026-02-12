@@ -6,9 +6,9 @@ This module implements a kernel-based self-attention mechanism that replaces
 kernel similarity φ(Q)φ(K)^T.
 
 Mask convention used here:
-- attention_mask is expected as a *binary keep-mask* of shape (batch, 1, 1, seq_len)
-    1.0 = keep/attend
-    0.0 = mask out
+- attention_mask is expected in DistilBERT format of shape (batch, 1, 1, seq_len)
+    0.0 = attend
+    1.0 = mask out
 The module converts it internally to an additive mask.
 """
 
@@ -123,12 +123,14 @@ class KernelSelfAttention(nn.Module):
             ks_mean = kernel_scores.mean().item() if not torch.isnan(kernel_scores).any() else float("nan")
             print(f"[KernelSelfAttention] dot_scores mean={ds_mean:.4f} | kernel_scores mean={ks_mean:.4f}")
 
-        # Apply binary keep-mask -> additive mask
+        # Apply DistilBERT mask convention: 1=attend, 0=mask
         if attention_mask is not None:
             if attention_mask.dim() != 4:
                 raise ValueError(f"Expected attention_mask shape (b,1,1,s), got {tuple(attention_mask.shape)}")
-            # keep=1 => add 0; mask=0 => add -1e4
-            additive = (attention_mask - 1.0) * 10000.0
+            # 1.0 = attend (add 0), 0.0 = mask (add -1e4)
+            # Cast to float in case it's a bool tensor
+            mask_float = attention_mask.to(attention_scores.dtype)
+            additive = (mask_float - 1.0) * 10000.0
             attention_scores = attention_scores + additive
 
         attention_weights = torch.softmax(attention_scores, dim=-1)

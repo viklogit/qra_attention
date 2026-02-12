@@ -26,60 +26,82 @@ from qra_attention.attention.kernel_attention import KernelSelfAttention
 class KernelAttentionWrapper(nn.Module):
     """Adapter that makes KernelSelfAttention look like DistilBERT attention.
 
-    DistilBERT calls each layer's attention module with:
-        forward(hidden_states, attention_mask=None, head_mask=None, output_attentions=False)
+    Handles multiple DistilBERT calling conventions:
+    - Old: forward(query, key, value, mask, head_mask, output_attentions)
+    - New: forward(hidden_states, attention_mask=None, head_mask=None, output_attentions=False)
 
-    attention_mask can be:
-      - (batch, seq_len) with 1=keep, 0=pad
-      - (batch, 1, 1, seq_len) additive mask with 0 for keep and negative for masked positions
-
-    This wrapper converts it into a binary keep-mask:
-        (batch, 1, 1, seq_len) with 1.0=keep, 0.0=mask
+    Where mask is (batch, seq_len) with 0=attend, 1=mask (DistilBERT convention).
     """
 
     def __init__(self, kernel_attention: KernelSelfAttention):
         super().__init__()
         self.kernel_attention = kernel_attention
 
-    @staticmethod
-    def _to_binary_keep_mask(attention_mask: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
-        """Convert DistilBERT mask formats into a binary keep-mask (b,1,1,s) with 1 keep / 0 mask."""
-        if attention_mask is None:
-            return None
-
-        # (b, s) binary: 1 keep, 0 pad
-        if attention_mask.dim() == 2:
-            keep = attention_mask.to(dtype=torch.float32).unsqueeze(1).unsqueeze(2)
-            return keep
-
-        # (b, 1, 1, s) additive: 0 keep, negative mask
-        if attention_mask.dim() == 4:
-            keep = (attention_mask == 0).to(dtype=torch.float32)
-            return keep
-
-        raise ValueError(f"Unsupported attention_mask shape: {tuple(attention_mask.shape)}")
-
     def forward(
         self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
+        query: torch.Tensor,
+        key: Optional[torch.Tensor] = None,
+        value: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
         head_mask: Optional[torch.Tensor] = None,
         output_attentions: bool = False,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, ...]:
-        keep_mask = self._to_binary_keep_mask(attention_mask)
-
-        # KernelSelfAttention returns (context, attn_probs)
+        **kwargs
+    ):
+        """
+        Forward pass matching DistilBERT MultiHeadSelfAttention interface.
+        
+        Handles both old signature (query, key, value, mask) and new signature
+        where query=hidden_states and mask might be passed as attention_mask kwarg.
+        
+        Args:
+            query: (batch, seq_len, hidden_size) - for self-attn, this is hidden_states
+            key: (batch, seq_len, hidden_size) - usually same as query, or None
+            value: (batch, seq_len, hidden_size) - usually same as query, or None
+            mask: (batch, seq_len) with 0=attend, 1=mask, or None
+            head_mask: Not used (for compatibility)
+            output_attentions: Whether to return attention weights
+            **kwargs: Catches 'attention_mask' if passed as kwarg
+            
+        Returns:
+            tuple: (attention_output, attention_weights) or (attention_output, None)
+        """
+        # Handle attention_mask passed as kwarg (newer transformers versions)
+        if mask is None and 'attention_mask' in kwargs:
+            mask = kwargs['attention_mask']
+        
+        # Reshape mask to (batch, 1, 1, seq_len) if needed
+        attention_mask = None
+        if mask is not None:
+            if mask.dim() == 2:
+                # (batch, seq) -> (batch, 1, 1, seq)
+                attention_mask = mask.unsqueeze(1).unsqueeze(2)
+            elif mask.dim() == 4:
+                # Already 4D - check if it's (batch, 1, 1, seq) or (batch, 1, seq, seq)
+                if mask.shape[2] == 1:
+                    # (batch, 1, 1, seq) - use as is
+                    attention_mask = mask
+                else:
+                    # (batch, 1, seq, seq) - this is a full attention matrix, take diagonal or first row
+                    # Actually, for DistilBERT this shouldn't happen. Use first row as the mask.
+                    attention_mask = mask[:, :, :1, :]  # (batch, 1, 1, seq)
+            else:
+                # Unexpected shape - just use as is and let KernelSelfAttention raise error
+                attention_mask = mask
+        
+        # Call kernel attention (query is used as hidden_states for self-attention)
         context, attn_probs = self.kernel_attention(
-            hidden_states,
-            attention_mask=keep_mask,
+            query,  # hidden_states
+            attention_mask=attention_mask,
             head_mask=head_mask,
-            output_attentions=True,  # compute internally
+            output_attentions=output_attentions,
         )
 
+        # DistilBERT TransformerBlock always unpacks 2 values
         if output_attentions:
             return (context, attn_probs)
-        return (context,)
+        return (context, None)
+
+
 
 
 def patch_distilbert_attention(
