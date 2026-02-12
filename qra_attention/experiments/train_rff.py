@@ -48,6 +48,7 @@ def main():
     parser.add_argument("--alpha", type=float, default=0.9, help="Hybrid blending alpha (default: 0.9)")
     parser.add_argument("--learning_rate", type=float, default=ExperimentConfig.learning_rate, help="Learning rate")
     parser.add_argument("--fp16", action="store_true", help="Use FP16 precision")
+    parser.add_argument("--train_fraction", type=float, default=1.0, help="Fraction of training data to use")
     
     args = parser.parse_args()
     
@@ -64,11 +65,21 @@ def main():
     
     print(f"Loading model: {config.model_name}")
     print(f"Output directory: {args.output_dir}")
+    print(f"Train fraction: {args.train_fraction}")
     print(f"Configuration: RFF features={args.num_features}, sigma={args.sigma}, alpha={args.alpha}")
     
     # 2. Data Loading
     print("Loading IMDb dataset...")
     dataset = load_dataset("imdb")
+    
+    # Handle train fraction
+    if args.train_fraction < 1.0:
+        num_train = len(dataset["train"])
+        subset_size = int(num_train * args.train_fraction)
+        print(f"Subsetting training data: {args.train_fraction} ({subset_size}/{num_train})")
+        # Use seed for reproducible subsetting
+        dataset["train"] = dataset["train"].shuffle(seed=args.seed).select(range(subset_size))
+
     tokenizer = DistilBertTokenizer.from_pretrained(config.model_name)
     
     def tokenize_function(examples):
